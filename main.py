@@ -19,7 +19,7 @@ def get_user_inputs() -> dict:
     print("=" * 60)
 
     company = input("\nCompany Name       : ").strip()
-    ticker  = input("Ticker Symbol      : ").strip()
+    ticker  = ""
 
     print("\nSector options:")
     sectors = [
