@@ -19,7 +19,8 @@ def get_user_inputs() -> dict:
     print("=" * 60)
 
     company = input("\nCompany Name       : ").strip()
-    ticker  = ""
+    ticker  = input("Ticker Symbol      : ").strip()
+    print("  (Example: TATAPOWER.NS / ADANIPOWER.NS / HDFCBANK.NS)")
 
     print("\nSector options:")
     sectors = [
