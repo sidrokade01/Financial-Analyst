@@ -223,16 +223,16 @@ with right:
                 os.makedirs("outputs", exist_ok=True)
                 safe_name  = company.replace(" ", "_").replace("/", "-")
                 timestamp  = datetime.now().strftime("%Y%m%d_%H%M%S")
-                excel_path = f"outputs/{safe_name}_{timestamp}.xlsx"
+                json_path  = f"outputs/{safe_name}_{timestamp}.json"
 
-                from main import write_excel
-                write_excel(final_state, feedback, excel_path)
+                from main import write_json
+                write_json(final_state, feedback, json_path)
 
                 total_cost = runner.get_total_cost()
                 status.update(label="✅ Analysis Complete!", state="complete")
 
                 # Store results in session state
-                st.session_state["excel_path"] = excel_path
+                st.session_state["json_path"]  = json_path
                 st.session_state["total_cost"] = total_cost
                 st.session_state["company"]    = company
                 st.session_state["feedback"]   = feedback
@@ -244,8 +244,8 @@ with right:
                 st.stop()
 
     # ── Show result if available ────────────────────────────────
-    if "excel_path" in st.session_state:
-        excel_path  = st.session_state["excel_path"]
+    if "json_path" in st.session_state:
+        json_path   = st.session_state["json_path"]
         total_cost  = st.session_state["total_cost"]
         company_out = st.session_state["company"]
         feedback    = st.session_state["feedback"]
@@ -255,18 +255,18 @@ with right:
 
         cr = (final_state.get("consistency_report") or {})
         col1, col2, col3 = st.columns(3)
-        col1.metric("Decision",  feedback.get("decision", "N/A").upper())
-        col2.metric("QC Status", cr.get("status", "N/A").upper())
+        col1.metric("Decision",   feedback.get("decision", "N/A").upper())
+        col2.metric("QC Status",  cr.get("status", "N/A").upper())
         col3.metric("Total Cost", f"${total_cost:.4f}")
 
         st.divider()
 
-        with open(excel_path, "rb") as f:
+        with open(json_path, "rb") as f:
             st.download_button(
-                label="📥 Download Excel Report",
+                label="📥 Download JSON Report",
                 data=f.read(),
-                file_name=os.path.basename(excel_path),
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                file_name=os.path.basename(json_path),
+                mime="application/json",
                 use_container_width=True,
             )
     else:

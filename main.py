@@ -764,6 +764,73 @@ def write_excel(final_state: dict, feedback: dict, output_path: str):
 # Entry point
 # ─────────────────────────────────────────────────────────────
 
+def write_json(final_state: dict, feedback: dict, output_path: str):
+    """Write all pipeline outputs into a single structured JSON file."""
+    import json
+
+    cr  = final_state.get("consistency_report") or {}
+    ctx = final_state.get("deal_context") or {}
+
+    output = {
+        "deal_context":       ctx,
+        "summary": {
+            "company":        ctx.get("target_name"),
+            "ticker":         ctx.get("target_ticker"),
+            "sector":         ctx.get("sector"),
+            "geography":      ctx.get("geography"),
+            "transaction_type": ctx.get("transaction_type"),
+            "segments":       ctx.get("segments"),
+            "decision":       feedback.get("decision"),
+            "qc_status":      cr.get("status"),
+            "qc_score":       cr.get("score"),
+        },
+        "financial_model":    final_state.get("financial_model"),
+        "valuation":          final_state.get("valuation"),
+        "benchmarking":       final_state.get("benchmarking"),
+        "assembly_review":    final_state.get("consistency_report"),
+        "human_feedback":     feedback,
+        "formula_reference": {
+            "financial_model": [
+                {"output": "Revenue (FY+1)",      "formula": "Revenue_t = Revenue_(t-1) × (1 + Growth Rate)",        "notes": "CAGR-based projection"},
+                {"output": "EBITDA",              "formula": "EBITDA = Revenue × EBITDA Margin %",                    "notes": "Margin applied to revenue"},
+                {"output": "EBIT",                "formula": "EBIT = EBITDA − Depreciation",                          "notes": "D&A subtracted"},
+                {"output": "PAT",                 "formula": "PAT = EBIT × (1 − Tax Rate)",                           "notes": "Effective tax rate applied"},
+                {"output": "Free Cash Flow",      "formula": "FCF = EBITDA − Tax − Capex − ΔWorking Capital",         "notes": "Unlevered FCF"},
+                {"output": "Net Working Capital", "formula": "NWC = Current Assets − Current Liabilities",             "notes": "Balance sheet derived"},
+                {"output": "Net Debt",            "formula": "Net Debt = Total Debt − Cash & Equivalents",             "notes": "Used in EV bridge"},
+                {"output": "Balance Check",       "formula": "Total Assets = Total Liabilities + Shareholders Equity", "notes": "Must balance"},
+            ],
+            "valuation": [
+                {"output": "Cost of Equity",      "formula": "Re = Rf + β × (Rm − Rf)",                                        "notes": "CAPM"},
+                {"output": "WACC",                "formula": "WACC = (E/V) × Re + (D/V) × Rd × (1 − Tax Rate)",                "notes": "Weighted average cost of capital"},
+                {"output": "Discounted FCF",      "formula": "PV = FCF_t / (1 + WACC)^t",                                      "notes": "Sum over projection period"},
+                {"output": "Terminal Value",      "formula": "TV = FCF_last × (1 + g) / (WACC − g)",                           "notes": "Gordon Growth Model"},
+                {"output": "Enterprise Value",    "formula": "EV = Σ PV(FCF) + PV(Terminal Value)",                            "notes": "DCF-based EV"},
+                {"output": "Equity Value",        "formula": "Equity Value = EV − Net Debt",                                    "notes": "EV bridge"},
+                {"output": "Implied Price",       "formula": "Price = Equity Value / Shares Outstanding",                       "notes": "Per share value"},
+                {"output": "Upside %",            "formula": "Upside = (Implied Price − Current Price) / Current Price × 100",  "notes": "vs current market price"},
+                {"output": "SOTP EV",             "formula": "Segment EV = Segment EBITDA × EV/EBITDA Multiple",                "notes": "Sum of parts"},
+                {"output": "Trading Comps EV",    "formula": "EV = EBITDA × Peer Median EV/EBITDA",                            "notes": "Market multiple"},
+            ],
+            "benchmarking": [
+                {"metric": "EV / EBITDA",       "formula": "EV / EBITDA",                                            "notes": "Primary valuation multiple"},
+                {"metric": "P/E Ratio",         "formula": "Market Price / EPS",                                     "notes": "Equity market multiple"},
+                {"metric": "Net Debt / EBITDA", "formula": "Net Debt / EBITDA",                                      "notes": "Leverage ratio"},
+                {"metric": "ROE",               "formula": "Net Profit / Shareholders Equity × 100",                 "notes": "Return on equity (%)"},
+                {"metric": "EBITDA Margin",     "formula": "EBITDA / Revenue × 100",                                 "notes": "Operating profitability (%)"},
+                {"metric": "Revenue CAGR",      "formula": "(Revenue_end / Revenue_start) ^ (1/n) − 1",              "notes": "Compound annual growth rate"},
+                {"metric": "EV / MW",           "formula": "Enterprise Value / Installed Capacity (MW)",             "notes": "Capacity-based valuation"},
+                {"metric": "Peer Median",       "formula": "Median of all peer values per metric",                   "notes": "Benchmark vs target"},
+            ],
+        },
+    }
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2, ensure_ascii=False, default=str)
+
+    print(f"  JSON saved → {output_path}")
+
+
 if __name__ == "__main__":
     import os
     from dotenv import load_dotenv
@@ -779,9 +846,9 @@ if __name__ == "__main__":
     ctx        = final_state.get("deal_context") or {}
     safe_name  = ctx.get("target_name", "Company").replace(" ", "_")
 
-    excel_path = os.path.join(output_dir, f"{safe_name}_{timestamp}.xlsx")
+    json_path = os.path.join(output_dir, f"{safe_name}_{timestamp}.json")
 
-    write_excel(final_state, feedback, excel_path)
+    write_json(final_state, feedback, json_path)
 
     cr = final_state.get("consistency_report") or {}
     print(f"\n{'='*60}")
@@ -789,5 +856,5 @@ if __name__ == "__main__":
     print(f"{'='*60}")
     print(f"  Decision   : {feedback['decision'].upper()}")
     print(f"  QC Status  : {cr.get('status', 'N/A').upper()}")
-    print(f"  Excel      : {excel_path}")
+    print(f"  JSON       : {json_path}")
     print(f"{'='*60}")
