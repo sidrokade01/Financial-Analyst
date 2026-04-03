@@ -1,7 +1,7 @@
 """
 Valuation Agent
 ---------------
-Model  : Sonnet
+Model  : Opus (high reasoning for complex valuation judgment)
 Input  : financial_model + raw_data
 Output : valuation (JSON)
 """
@@ -12,7 +12,7 @@ SYSTEM_PROMPT = """You are a Valuation Analyst for a Goldman Sachs IB pitch team
 Output ONLY valid compact JSON. No markdown. No extra text. No explanations outside JSON.
 Always close all JSON brackets properly. Use numbers not strings for numeric fields."""
 
-MODEL = "claude-sonnet-4-6"
+MODEL = "claude-opus-4-6"
 
 
 def run(state: dict, runner) -> dict:

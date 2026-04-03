@@ -1,304 +1,273 @@
 """
-IB Pitch Analyst System — FastAPI Multi-User Server
-====================================================
+IB Pitch Analyst System — Streamlit App
+========================================
 Run with:
-  pip install fastapi uvicorn
-  python app.py
-
-Access at: http://localhost:8000
-Share IP with team: http://YOUR_IP:8000
+  streamlit run app.py
 """
 
 import os
-import sys
-import uuid
-import json
-import asyncio
-import threading
+import io
+import tempfile
 from datetime import datetime
-from pathlib import Path
-from typing import Optional
+from dotenv import load_dotenv
 
-import uvicorn
-from fastapi import FastAPI, BackgroundTasks
-from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+import streamlit as st
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(__file__))
+load_dotenv()
 
-# ─────────────────────────────────────────────────────────────
-# App setup
-# ─────────────────────────────────────────────────────────────
-app = FastAPI(title="IB Pitch Analyst System")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+# ── Page config ────────────────────────────────────────────────
+st.set_page_config(
+    page_title="IB Pitch Analyst",
+    page_icon="🏦",
+    layout="wide",
 )
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+st.markdown("""
+<style>
+  .main-header { font-size: 28px; font-weight: 800; color: #2A2356; }
+  .sub-header  { font-size: 13px; color: #888; margin-top: -8px; }
+  .section-title { font-size: 13px; font-weight: 700; color: #7C6FCD;
+                   text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  div[data-testid="stDownloadButton"] button {
+    background: #1D6F42; color: white; font-weight: 700;
+    border-radius: 8px; padding: 10px 24px; font-size: 15px;
+    border: none; width: 100%;
+  }
+</style>
+""", unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────────────────────
-# In-memory job store (per user session)
-# ─────────────────────────────────────────────────────────────
-jobs: dict = {}  # job_id → job info
+# ── Header ─────────────────────────────────────────────────────
+st.markdown('<div class="main-header">🏦 IB Pitch Analyst System</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Goldman Sachs India IBD · Powered by Claude AI</div>', unsafe_allow_html=True)
+st.divider()
 
+# ── Layout ─────────────────────────────────────────────────────
+left, right = st.columns([1, 1], gap="large")
 
-# ─────────────────────────────────────────────────────────────
-# Request model
-# ─────────────────────────────────────────────────────────────
-class AnalysisRequest(BaseModel):
-    company_name: str
-    ticker: str
-    sector: str
-    geography: str
-    transaction_type: str
-    segments: list[str]
+with left:
+    st.markdown('<div class="section-title">📋 Company Details</div>', unsafe_allow_html=True)
 
+    company = st.text_input("Company Name", placeholder="e.g. Tata Power Company Limited")
+    ticker  = st.text_input("Ticker Symbol", placeholder="e.g. TATAPOWER.NS")
 
-# ─────────────────────────────────────────────────────────────
-# Pipeline runner (runs in background thread)
-# ─────────────────────────────────────────────────────────────
-def run_pipeline_thread(job_id: str, req: AnalysisRequest):
-    """Runs the analyst pipeline in a background thread."""
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
+    sector = st.selectbox("Sector", [
+        "Power / Utilities",
+        "Oil & Gas / Conglomerate",
+        "Banking & Financial Services",
+        "IT Services",
+        "FMCG",
+        "Telecommunications",
+    ])
 
-        from state import AnalystState
-        from runner import SubAgentRunner
-        from pipeline import build_analyst_graph
-        from human_gate import human_gate
+    geography = st.selectbox("Geography", ["India", "USA", "UK", "Singapore", "UAE"])
 
-        jobs[job_id]["status"] = "running"
-        jobs[job_id]["progress"] = []
+    transaction_type = st.selectbox("Transaction Type", [
+        ("Buy", "buy-side_advisory"),
+        ("Sell", "sell-side_advisory"),
+        ("IPO", "ipo"),
+        ("Merger", "merger"),
+        ("Acquisition", "acquisition"),
+    ], format_func=lambda x: x[0])
 
-        def log(msg: str):
-            jobs[job_id]["progress"].append(msg)
-            print(f"[{job_id[:8]}] {msg}")
+    st.divider()
+    st.markdown('<div class="section-title">🗂️ Business Segments</div>', unsafe_allow_html=True)
 
-        log("🔄 Starting pipeline...")
+    preset_segments = [
+        "Thermal Generation", "Renewable Energy", "Distribution",
+        "EV Charging", "Solar Manufacturing",
+    ]
+    selected_segments = st.multiselect(
+        "Select segments (choose one or more)",
+        options=preset_segments,
+        default=["Thermal Generation", "Renewable Energy"],
+    )
+    custom_seg = st.text_input("Add custom segment (optional)", placeholder="e.g. Green Hydrogen")
+    if custom_seg and custom_seg not in selected_segments:
+        selected_segments = selected_segments + [custom_seg]
 
-        deal_context = {
-            "target_name":       req.company_name,
-            "target_ticker":     req.ticker,
-            "sector":            req.sector,
-            "segments":          req.segments,
-            "transaction_type":  req.transaction_type,
-            "listed":            True,
-            "geography":         req.geography,
+    st.divider()
+    st.markdown('<div class="section-title">📄 Upload Company PDF (Optional)</div>', unsafe_allow_html=True)
+
+    uploaded_file = st.file_uploader(
+        "Quarterly Results / Annual Report / Investor Presentation",
+        type=["pdf"],
+        help="Upload a PDF to give Claude real financial data instead of estimates.",
+    )
+
+    pdf_text = ""
+    if uploaded_file:
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(uploaded_file.read()))
+            for page in reader.pages:
+                pdf_text += page.extract_text() + "\n"
+            pdf_text = pdf_text[:8000]
+            st.success(f"✅ PDF loaded — {len(pdf_text):,} characters extracted")
+        except Exception as e:
+            st.error(f"Could not read PDF: {e}")
+
+    run_clicked = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
+
+# ── Right panel: results ────────────────────────────────────────
+with right:
+    st.markdown('<div class="section-title">⚙️ Pipeline Output</div>', unsafe_allow_html=True)
+
+    if run_clicked:
+        # Validate
+        if not company:
+            st.error("Please enter a company name.")
+            st.stop()
+        if not ticker:
+            st.error("Please enter a ticker symbol.")
+            st.stop()
+        if not selected_segments:
+            st.error("Please select at least one segment.")
+            st.stop()
+
+        # Build inputs
+        inputs = {
+            "company":          company,
+            "ticker":           ticker,
+            "sector":           sector,
+            "geography":        geography,
+            "transaction_type": transaction_type[1],
+            "segments":         selected_segments,
+            "pdf_text":         pdf_text,
         }
 
-        analyst_manifest = {
-            "priority": "high",
-            "deadline": "T+48h",
-            "iteration_budget": 3,
-            "quality_thresholds": {
-                "balance_check": True,
-                "source_citation": "every_assumption",
-                "segment_reconciliation": True,
-            },
-        }
+        # Run pipeline
+        with st.status("Running analyst pipeline...", expanded=True) as status:
+            try:
+                st.write("🔄 Starting pipeline...")
 
-        initial_state: AnalystState = {
-            "deal_context":       deal_context,
-            "analyst_manifest":   analyst_manifest,
-            "raw_data":           None,
-            "financial_model":    None,
-            "valuation":          None,
-            "benchmarking":       None,
-            "analyst_package":    None,
-            "consistency_report": None,
-            "human_feedback":     None,
-            "status":             "running",
-            "errors":             [],
-        }
+                from state import AnalystState
+                from runner import SubAgentRunner
+                from pipeline import build_analyst_graph
+                from human_gate import human_gate
 
-        runner   = SubAgentRunner()
-        compiled = build_analyst_graph(runner)
+                deal_context = {
+                    "target_name":      inputs["company"],
+                    "target_ticker":    inputs["ticker"],
+                    "sector":           inputs["sector"],
+                    "segments":         inputs["segments"],
+                    "transaction_type": inputs["transaction_type"],
+                    "listed":           True,
+                    "geography":        inputs["geography"],
+                    "pdf_data":         inputs["pdf_text"],
+                }
 
-        log("✅ [1/5] Data Sourcing — running...")
-        if compiled:
-            config      = {"configurable": {"thread_id": job_id}}
-            final_state = compiled.invoke(initial_state, config)
-        else:
-            import agents.data_sourcing     as ds
-            import agents.financial_modeler as fm
-            import agents.benchmarking      as bm
-            import agents.valuation         as val
-            import agents.assembly          as asm
+                analyst_manifest = {
+                    "priority": "high",
+                    "deadline": "T+48h",
+                    "iteration_budget": 3,
+                    "quality_thresholds": {
+                        "balance_check": True,
+                        "source_citation": "every_assumption",
+                        "segment_reconciliation": True,
+                    },
+                }
 
-            state = dict(initial_state)
-            state.update(ds.run(state, runner));  log("✅ [1/5] Data Sourcing — done")
-            state.update(fm.run(state, runner));  log("✅ [2/5] Financial Model — done")
-            state.update(bm.run(state, runner));  log("✅ [3/5] Benchmarking — done")
-            state.update(val.run(state, runner)); log("✅ [4/5] Valuation — done")
-            state.update(asm.run(state, runner)); log("✅ [5/5] Assembly QC — done")
-            final_state = state
+                initial_state: AnalystState = {
+                    "deal_context":       deal_context,
+                    "analyst_manifest":   analyst_manifest,
+                    "raw_data":           None,
+                    "financial_model":    None,
+                    "valuation":          None,
+                    "benchmarking":       None,
+                    "analyst_package":    None,
+                    "consistency_report": None,
+                    "human_feedback":     None,
+                    "status":             "running",
+                    "errors":             [],
+                }
 
-        feedback = human_gate(
-            final_state.get("analyst_package", {}),
-            final_state.get("consistency_report", {}),
-        )
+                runner   = SubAgentRunner()
+                compiled = build_analyst_graph(runner)
 
-        # Write outputs
-        log("📊 Writing Excel output...")
-        os.makedirs("outputs", exist_ok=True)
-        safe_name  = req.company_name.replace(" ", "_").replace("/", "-")
-        timestamp  = datetime.now().strftime("%Y%m%d_%H%M%S")
-        excel_path = f"outputs/{safe_name}_{timestamp}.xlsx"
-        svg_path   = f"outputs/{safe_name}_{timestamp}_football_field.svg"
+                if compiled:
+                    config      = {"configurable": {"thread_id": f"{company}-{datetime.now().isoformat()}"}}
+                    final_state = compiled.invoke(initial_state, config)
+                else:
+                    import agents.data_sourcing     as ds
+                    import agents.financial_modeler as fm
+                    import agents.benchmarking      as bm
+                    import agents.valuation         as val
+                    import agents.assembly          as asm
 
-        from main import write_excel, write_football_field_svg, write_zip_package
-        write_excel(final_state, feedback, excel_path)
-        log("📊 Writing Football Field SVG...")
-        write_football_field_svg(final_state, svg_path)
-        log("📦 Creating ZIP package...")
-        zip_path = write_zip_package("outputs", excel_path, svg_path, final_state)
+                    state = dict(initial_state)
 
-        total_cost = runner.get_total_cost()
-        log(f"💰 Total cost: ${total_cost:.4f}")
-        log(f"✅ Done! All outputs ready.")
+                    st.write("✅ [1/5] Data Sourcing...")
+                    state.update(ds.run(state, runner))
 
-        jobs[job_id].update({
-            "status":     "done",
-            "excel_path": excel_path,
-            "svg_path":   svg_path,
-            "zip_path":   zip_path,
-            "cost":       round(total_cost, 4),
-            "decision":   feedback.get("decision", "N/A"),
-            "qc_status":  (final_state.get("consistency_report") or {}).get("status", "N/A"),
-        })
+                    st.write("✅ [2/5] Financial Modeler...")
+                    state.update(fm.run(state, runner))
 
-    except Exception as e:
-        jobs[job_id]["status"]  = "error"
-        jobs[job_id]["error"]   = str(e)
-        jobs[job_id]["progress"].append(f"❌ Error: {e}")
-        print(f"Pipeline error [{job_id[:8]}]: {e}")
+                    st.write("✅ [3/5] Benchmarking...")
+                    state.update(bm.run(state, runner))
 
+                    st.write("✅ [4/5] Valuation (Opus)...")
+                    state.update(val.run(state, runner))
 
-# ─────────────────────────────────────────────────────────────
-# Routes
-# ─────────────────────────────────────────────────────────────
+                    st.write("✅ [5/5] Assembly & QC...")
+                    state.update(asm.run(state, runner))
 
-@app.get("/", response_class=HTMLResponse)
-async def home():
-    html_path = Path("static/index.html")
-    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+                    final_state = state
 
+                feedback = human_gate(
+                    final_state.get("analyst_package", {}),
+                    final_state.get("consistency_report", {}),
+                )
 
-@app.post("/api/run")
-async def run_analysis(req: AnalysisRequest):
-    """Start a new analysis job."""
-    if not req.company_name or not req.ticker or not req.segments:
-        return {"error": "Company name, ticker and at least one segment are required."}
+                st.write("📊 Generating Excel report...")
 
-    job_id = str(uuid.uuid4())
-    jobs[job_id] = {
-        "job_id":     job_id,
-        "status":     "queued",
-        "progress":   [],
-        "excel_path": None,
-        "cost":       None,
-        "company":    req.company_name,
-        "created_at": datetime.now().isoformat(),
-    }
+                os.makedirs("outputs", exist_ok=True)
+                safe_name  = company.replace(" ", "_").replace("/", "-")
+                timestamp  = datetime.now().strftime("%Y%m%d_%H%M%S")
+                excel_path = f"outputs/{safe_name}_{timestamp}.xlsx"
 
-    thread = threading.Thread(
-        target=run_pipeline_thread,
-        args=(job_id, req),
-        daemon=True,
-    )
-    thread.start()
+                from main import write_excel
+                write_excel(final_state, feedback, excel_path)
 
-    return {"job_id": job_id}
+                total_cost = runner.get_total_cost()
+                status.update(label="✅ Analysis Complete!", state="complete")
 
+                # Store results in session state
+                st.session_state["excel_path"] = excel_path
+                st.session_state["total_cost"] = total_cost
+                st.session_state["company"]    = company
+                st.session_state["feedback"]   = feedback
+                st.session_state["final_state"] = final_state
 
-@app.get("/api/status/{job_id}")
-async def get_status(job_id: str):
-    """Poll job status and progress logs."""
-    job = jobs.get(job_id)
-    if not job:
-        return {"error": "Job not found"}
-    return job
+            except Exception as e:
+                status.update(label="❌ Pipeline failed", state="error")
+                st.error(f"Error: {e}")
+                st.stop()
 
+    # ── Show result if available ────────────────────────────────
+    if "excel_path" in st.session_state:
+        excel_path  = st.session_state["excel_path"]
+        total_cost  = st.session_state["total_cost"]
+        company_out = st.session_state["company"]
+        feedback    = st.session_state["feedback"]
+        final_state = st.session_state["final_state"]
 
-@app.get("/api/download/{job_id}")
-async def download_excel(job_id: str):
-    """Download the Excel file for a completed job."""
-    job = jobs.get(job_id)
-    if not job or job["status"] != "done":
-        return {"error": "Job not complete"}
+        st.success(f"✅ **{company_out}** — analysis complete!")
 
-    path = job["excel_path"]
-    if not path or not os.path.exists(path):
-        return {"error": "File not found"}
+        cr = (final_state.get("consistency_report") or {})
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Decision",  feedback.get("decision", "N/A").upper())
+        col2.metric("QC Status", cr.get("status", "N/A").upper())
+        col3.metric("Total Cost", f"${total_cost:.4f}")
 
-    filename = os.path.basename(path)
-    return FileResponse(
-        path=path,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=filename,
-    )
+        st.divider()
 
-
-@app.get("/api/download/svg/{job_id}")
-async def download_svg(job_id: str):
-    """Download the Football Field SVG chart for a completed job."""
-    job = jobs.get(job_id)
-    if not job or job["status"] != "done":
-        return {"error": "Job not complete"}
-
-    path = job.get("svg_path")
-    if not path or not os.path.exists(path):
-        return {"error": "SVG file not found"}
-
-    filename = os.path.basename(path)
-    return FileResponse(
-        path=path,
-        media_type="image/svg+xml",
-        filename=filename,
-    )
-
-
-@app.get("/api/download/zip/{job_id}")
-async def download_zip(job_id: str):
-    """Download the full ZIP analyst package for a completed job."""
-    job = jobs.get(job_id)
-    if not job or job["status"] != "done":
-        return {"error": "Job not complete"}
-
-    path = job.get("zip_path")
-    if not path or not os.path.exists(path):
-        return {"error": "ZIP file not found"}
-
-    filename = os.path.basename(path)
-    return FileResponse(
-        path=path,
-        media_type="application/zip",
-        filename=filename,
-    )
-
-
-@app.get("/api/jobs")
-async def list_jobs():
-    """List all jobs (admin view)."""
-    return list(jobs.values())
-
-
-# ─────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("  IB Pitch Analyst System — Multi-User Server")
-    print("="*60)
-    print("  Local  : http://localhost:8000")
-    print("  Network: http://YOUR_IP:8000")
-    print("="*60 + "\n")
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=False)
+        with open(excel_path, "rb") as f:
+            st.download_button(
+                label="📥 Download Excel Report",
+                data=f.read(),
+                file_name=os.path.basename(excel_path),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+    else:
+        st.info("Fill in the company details on the left and click **Run Analysis**.")

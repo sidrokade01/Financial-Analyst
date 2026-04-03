@@ -12,23 +12,83 @@ from pipeline import build_analyst_graph
 from human_gate import human_gate
 
 
-def run_analyst_pipeline():
-    """Execute the full Analyst Agent pipeline for Tata Power."""
+def get_user_inputs() -> dict:
+    """Prompt user for company details in the terminal."""
+    print("\n" + "=" * 60)
+    print("  IB PITCH ANALYST SYSTEM")
+    print("=" * 60)
+
+    company = input("\nCompany Name       : ").strip()
+    ticker  = input("Ticker Symbol      : ").strip()
+
+    print("\nSector options:")
+    sectors = [
+        "Power / Utilities",
+        "Oil & Gas / Conglomerate",
+        "Banking & Financial Services",
+        "IT Services",
+        "FMCG",
+        "Telecommunications",
+    ]
+    for i, s in enumerate(sectors, 1):
+        print(f"  {i}. {s}")
+    sec_idx = input("Choose sector (1-6): ").strip()
+    sector  = sectors[int(sec_idx) - 1] if sec_idx.isdigit() and 1 <= int(sec_idx) <= 6 else sec_idx
+
+    print("\nGeography options:  India / USA / UK / Singapore / UAE")
+    geography = input("Geography          : ").strip() or "India"
+
+    print("\nTransaction Type:   1. Buy  2. Sell  3. IPO  4. Merger  5. Acquisition")
+    txn_map = {"1": "buy-side_advisory", "2": "sell-side_advisory", "3": "ipo", "4": "merger", "5": "acquisition"}
+    txn_idx = input("Choose type (1-5)  : ").strip()
+    transaction_type = txn_map.get(txn_idx, "sell-side_advisory")
+
+    print("\nEnter business segments (comma-separated).")
+    print("Example: Thermal Generation, Renewable Energy, Distribution")
+    seg_input = input("Segments           : ").strip()
+    segments  = [s.strip() for s in seg_input.split(",") if s.strip()]
+
+    print("\nOptional: Path to a PDF file (quarterly results / annual report).")
+    print("Press Enter to skip.")
+    pdf_path = input("PDF path           : ").strip()
+    pdf_text = ""
+    if pdf_path:
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(pdf_path)
+            for page in reader.pages:
+                pdf_text += page.extract_text() + "\n"
+            pdf_text = pdf_text[:8000]
+            print(f"  ✅ PDF loaded — {len(pdf_text)} characters extracted")
+        except Exception as e:
+            print(f"  ⚠️  Could not read PDF: {e}")
+
+    return {
+        "company":          company,
+        "ticker":           ticker,
+        "sector":           sector,
+        "geography":        geography,
+        "transaction_type": transaction_type,
+        "segments":         segments,
+        "pdf_text":         pdf_text,
+    }
+
+
+def run_analyst_pipeline(inputs: dict = None):
+    """Execute the full Analyst Agent pipeline."""
+
+    if inputs is None:
+        inputs = get_user_inputs()
 
     deal_context: DealContext = {
-        "target_name": "Tata Power Company Limited",
-        "target_ticker": "TATAPOWER.NS",
-        "sector": "Power / Utilities",
-        "segments": [
-            "Thermal Generation",
-            "Renewable Energy",
-            "Distribution",
-            "EV Charging",
-            "Solar Manufacturing",
-        ],
-        "transaction_type": "sell-side_advisory",
-        "listed": True,
-        "geography": "India",
+        "target_name":      inputs["company"],
+        "target_ticker":    inputs["ticker"],
+        "sector":           inputs["sector"],
+        "segments":         inputs["segments"],
+        "transaction_type": inputs["transaction_type"],
+        "listed":           True,
+        "geography":        inputs["geography"],
+        "pdf_data":         inputs.get("pdf_text", ""),
     }
 
     analyst_manifest = {
@@ -58,7 +118,9 @@ def run_analyst_pipeline():
 
     print("\n" + "=" * 60)
     print("IB PITCH AGENT SYSTEM — Analyst Pipeline")
-    print(f"Target: {deal_context['target_name']}")
+    print(f"  Target  : {deal_context['target_name']}")
+    print(f"  Sector  : {deal_context['sector']}")
+    print(f"  Segments: {', '.join(deal_context['segments'])}")
     print("=" * 60)
 
     runner = SubAgentRunner()
@@ -322,6 +384,26 @@ def write_excel(final_state: dict, feedback: dict, output_path: str):
     for col, w in [(1, 30), (2, 18), (3, 18), (4, 18), (5, 18), (6, 18), (7, 15)]:
         set_col_width(ws2, col, w)
 
+    # ── Formula Reference Table (Financial Model) ───────────────
+    row += 2
+    write_section_title(ws2, row, 1, "Formula Reference", 3)
+    row += 1
+    write_header_row(ws2, row, ["Output", "Formula", "Notes"], 1)
+    row += 1
+    fm_formulas = [
+        ("Revenue (FY+1)",      "Revenue_t = Revenue_(t-1) × (1 + Growth Rate)",         "CAGR-based projection"),
+        ("EBITDA",              "EBITDA = Revenue × EBITDA Margin %",                     "Margin applied to revenue"),
+        ("EBIT",                "EBIT = EBITDA − Depreciation",                           "D&A subtracted"),
+        ("PAT (Net Profit)",    "PAT = EBIT × (1 − Tax Rate)",                            "Effective tax rate applied"),
+        ("Free Cash Flow",      "FCF = EBITDA − Tax − Capex − ΔWorking Capital",          "Unlevered FCF"),
+        ("Net Working Capital", "NWC = Current Assets − Current Liabilities",              "Balance sheet derived"),
+        ("Net Debt",            "Net Debt = Total Debt − Cash & Equivalents",              "Used in EV bridge"),
+        ("Balance Check",       "Total Assets = Total Liabilities + Shareholders Equity",  "Must balance"),
+    ]
+    for i, (out, formula, note) in enumerate(fm_formulas):
+        write_data_row(ws2, row, [out, formula, note], shade=(i % 2 == 0))
+        row += 1
+
     # ══════════════════════════════════════════════════════════════
     # Sheet 3: VALUATION
     # ══════════════════════════════════════════════════════════════
@@ -457,6 +539,29 @@ def write_excel(final_state: dict, feedback: dict, output_path: str):
     for col, w in [(1, 30), (2, 22), (3, 22), (4, 22), (5, 20), (6, 20)]:
         set_col_width(ws3, col, w)
 
+    # ── Formula Reference Table (Valuation) ─────────────────────
+    row += 2
+    write_section_title(ws3, row, 1, "Formula Reference", 3)
+    row += 1
+    write_header_row(ws3, row, ["Output", "Formula", "Notes"], 1)
+    row += 1
+    val_formulas = [
+        ("Cost of Equity (CAPM)",  "Re = Rf + β × (Rm − Rf)",                              "Rf = risk-free rate, β = beta, Rm = market return"),
+        ("WACC",                   "WACC = (E/V) × Re + (D/V) × Rd × (1 − Tax Rate)",      "E = equity, D = debt, V = E+D"),
+        ("Discounted FCF",         "PV = FCF_t / (1 + WACC)^t",                             "Sum over projection period"),
+        ("Terminal Value",         "TV = FCF_last × (1 + g) / (WACC − g)",                  "Gordon Growth Model; g = terminal growth rate"),
+        ("Enterprise Value (DCF)", "EV = Σ PV(FCF) + PV(Terminal Value)",                   "Total DCF-based EV"),
+        ("Equity Value",           "Equity Value = EV − Net Debt",                           "EV bridge to equity"),
+        ("Implied Price",          "Price = Equity Value / Shares Outstanding",               "Per share value"),
+        ("Upside / Downside",      "Upside % = (Implied Price − Current Price) / Current Price × 100", "vs current market price"),
+        ("SOTP Segment EV",        "Segment EV = Segment EBITDA × EV/EBITDA Multiple",       "Sum of parts per segment"),
+        ("Total SOTP EV",          "SOTP EV = Σ Segment EV",                                 "Aggregated across all segments"),
+        ("Trading Comps EV",       "EV = EBITDA × Peer Median EV/EBITDA",                    "Market-derived multiple"),
+    ]
+    for i, (out, formula, note) in enumerate(val_formulas):
+        write_data_row(ws3, row, [out, formula, note], shade=(i % 2 == 0))
+        row += 1
+
     # ══════════════════════════════════════════════════════════════
     # Sheet 4: BENCHMARKING
     # ══════════════════════════════════════════════════════════════
@@ -560,145 +665,35 @@ def write_excel(final_state: dict, feedback: dict, output_path: str):
     for col, w in [(1, 30), (2, 20), (3, 20), (4, 20), (5, 20)]:
         set_col_width(ws4, col, w)
 
-    # ══════════════════════════════════════════════════════════════
-    # Sheet 5: SENSITIVITY TABLES
-    # ══════════════════════════════════════════════════════════════
-    ws5 = wb.create_sheet("Sensitivity Tables")
-    ws5.sheet_view.showGridLines = False
-    ws5.merge_cells("A1:E1")
-    t5 = ws5["A1"]
-    t5.value = "SENSITIVITY ANALYSIS — REVENUE | EBITDA | FCF"
-    t5.font = Font(name="Calibri", bold=True, color=WHITE, size=14)
-    t5.fill = fill(DARK_BLUE)
-    t5.alignment = center()
-    ws5.row_dimensions[1].height = 35
-
-    fm = final_state.get("financial_model") or {}
-    sens = fm.get("sensitivity_tables", {})
-    row = 3
-
-    sens_titles = {
-        "revenue_vs_tariff_pct":    ("Revenue Sensitivity vs Tariff (%)", ["Scenario", "FY25", "FY26", "FY27"]),
-        "ebitda_vs_fuel_cost_pct":  ("EBITDA Sensitivity vs Fuel Cost (%)", ["Scenario", "FY25", "FY26", "FY27"]),
-        "fcf_vs_capex_pct":         ("FCF Sensitivity vs Capex (%)", ["Scenario", "FY25", "FY26", "FY27"]),
-    }
-
-    if sens and not fm.get("parse_error"):
-        for key, (title, headers) in sens_titles.items():
-            table = sens.get(key, {})
-            write_section_title(ws5, row, 1, title, len(headers))
-            row += 1
-            write_header_row(ws5, row, headers, 1)
-            row += 1
-            if isinstance(table, dict):
-                for i, (scenario, values) in enumerate(table.items()):
-                    label = scenario.replace("_", " ").title()
-                    if isinstance(values, dict):
-                        data = [label] + [values.get(y, "-") for y in ["FY25", "FY26", "FY27"]]
-                    else:
-                        data = [label, str(values), "", ""]
-                    write_data_row(ws5, row, data, shade=(i % 2 == 0))
-                    row += 1
-            row += 2
-    else:
-        ws5.cell(row=3, column=1, value="Run pipeline to populate sensitivity tables.").font = normal_font()
-
-    for col, w in [(1, 30), (2, 20), (3, 20), (4, 20), (5, 20)]:
-        set_col_width(ws5, col, w)
-
-    # ══════════════════════════════════════════════════════════════
-    # Sheet 6: DEBT SCHEDULE
-    # ══════════════════════════════════════════════════════════════
-    ws6 = wb.create_sheet("Debt Schedule")
-    ws6.sheet_view.showGridLines = False
-    ws6.merge_cells("A1:F1")
-    t6 = ws6["A1"]
-    t6.value = "DEBT SCHEDULE — MATURITY PROFILE & INTEREST"
-    t6.font = Font(name="Calibri", bold=True, color=WHITE, size=14)
-    t6.fill = fill(DARK_BLUE)
-    t6.alignment = center()
-    ws6.row_dimensions[1].height = 35
-
-    debt = fm.get("debt_schedule", {})
-    row = 3
-
-    if debt and not fm.get("parse_error"):
-        # Summary
-        write_section_title(ws6, row, 1, "Debt Summary", 3)
+    # ── Formula Reference Table (Benchmarking) ───────────────────
+    row += 2
+    write_section_title(ws4, row, 1, "Formula Reference", 3)
+    row += 1
+    write_header_row(ws4, row, ["Metric", "Formula", "Notes"], 1)
+    row += 1
+    bm_formulas = [
+        ("EV / EBITDA",         "EV / EBITDA",                                              "Primary valuation multiple for capital-intensive sectors"),
+        ("P/E Ratio",           "Market Price per Share / Earnings per Share (EPS)",         "Equity market multiple"),
+        ("Net Debt / EBITDA",   "Net Debt / EBITDA",                                         "Leverage ratio; lower = stronger balance sheet"),
+        ("ROE",                 "Net Profit / Shareholders Equity × 100",                    "Return on equity (%)"),
+        ("EBITDA Margin",       "EBITDA / Revenue × 100",                                    "Operating profitability (%)"),
+        ("Revenue CAGR",        "(Revenue_end / Revenue_start) ^ (1/n) − 1",                 "Compound annual growth rate over n years"),
+        ("EV / MW",             "Enterprise Value / Installed Capacity (MW)",                "Capacity-based valuation for power sector"),
+        ("Peer Median",         "Median of all peer values for each metric",                  "Used as benchmark vs target company"),
+    ]
+    for i, (metric, formula, note) in enumerate(bm_formulas):
+        write_data_row(ws4, row, [metric, formula, note], shade=(i % 2 == 0))
         row += 1
-        for label, key in [
-            ("Total Debt FY25 (INR Cr)", "total_debt_fy25_cr"),
-            ("Avg Cost of Debt (%)",     "avg_cost_of_debt_pct"),
-        ]:
-            write_data_row(ws6, row, [label, debt.get(key, "-")], shade=(row % 2 == 0))
-            row += 1
-
-        row += 1
-        # Maturity profile
-        maturity = debt.get("debt_maturity_profile", {})
-        if maturity:
-            write_section_title(ws6, row, 1, "Maturity Profile (INR Cr)", 3)
-            row += 1
-            write_header_row(ws6, row, ["Bucket", "Amount (INR Cr)"], 1)
-            row += 1
-            labels = {"within_1yr": "Within 1 Year", "1_3yr": "1–3 Years", "3_5yr": "3–5 Years", "beyond_5yr": "Beyond 5 Years"}
-            for i, (k, v) in enumerate(maturity.items()):
-                write_data_row(ws6, row, [labels.get(k, k), v], shade=(i % 2 == 0))
-                row += 1
-
-        row += 1
-        # Annual repayment & interest schedule
-        repay  = debt.get("annual_repayment_cr", {})
-        intexp = debt.get("interest_expense_cr", {})
-        if repay or intexp:
-            years = ["FY25", "FY26", "FY27", "FY28", "FY29"]
-            write_section_title(ws6, row, 1, "Annual Schedule (INR Cr)", 6)
-            row += 1
-            write_header_row(ws6, row, ["Item"] + years, 1)
-            row += 1
-            if repay:
-                write_data_row(ws6, row, ["Annual Repayment"] + [repay.get(y, "-") for y in years], shade=True)
-                row += 1
-            if intexp:
-                write_data_row(ws6, row, ["Interest Expense"] + [intexp.get(y, "-") for y in years])
-                row += 1
-
-        row += 1
-        # Working Capital
-        wc = fm.get("working_capital", {})
-        if wc:
-            write_section_title(ws6, row, 1, "Working Capital", 6)
-            row += 1
-            for label, key in [
-                ("Debtor Days",   "debtor_days"),
-                ("Creditor Days", "creditor_days"),
-                ("Inventory Days","inventory_days"),
-            ]:
-                write_data_row(ws6, row, [label, wc.get(key, "-")], shade=(row % 2 == 0))
-                row += 1
-            nwc = wc.get("net_working_capital_cr", {})
-            if nwc:
-                years = ["FY25", "FY26", "FY27", "FY28", "FY29"]
-                row += 1
-                write_header_row(ws6, row, ["Net Working Capital (Cr)"] + years, 1)
-                row += 1
-                write_data_row(ws6, row, ["NWC"] + [nwc.get(y, "-") for y in years])
-                row += 1
-    else:
-        ws6.cell(row=3, column=1, value="Run pipeline to populate debt schedule.").font = normal_font()
-
-    for col, w in [(1, 30), (2, 18), (3, 18), (4, 18), (5, 18), (6, 18)]:
-        set_col_width(ws6, col, w)
 
     # ══════════════════════════════════════════════════════════════
-    # Sheet 7: CONSISTENCY REPORT
+    # Sheet 5: ASSEMBLY / REVIEW
     # ══════════════════════════════════════════════════════════════
-    ws7 = wb.create_sheet("Consistency Report")
+    ws7 = wb.create_sheet("Assembly / Review")
     ws7.sheet_view.showGridLines = False
 
     ws7.merge_cells("A1:D1")
     t7 = ws7["A1"]
-    t7.value = "CONSISTENCY REPORT — ASSEMBLY AGENT QC"
+    t7.value = "ASSEMBLY / REVIEW — QC REPORT"
     t7.font = Font(name="Calibri", bold=True, color=WHITE, size=14)
     t7.fill = fill(DARK_BLUE)
     t7.alignment = center()
@@ -763,108 +758,6 @@ def write_excel(final_state: dict, feedback: dict, output_path: str):
     print(f"\n  ✅ Excel saved → {output_path}")
 
 
-def write_football_field_svg(final_state: dict, svg_path: str):
-    """Generate a football field SVG chart from valuation data."""
-    import os
-    val = final_state.get("valuation") or {}
-    ff  = val.get("football_field", {})
-
-    bars = []
-    for method, vals in ff.items():
-        if isinstance(vals, dict):
-            try:
-                lo = float(str(vals.get("low_cr", vals.get("low", 0))).replace(",", ""))
-                hi = float(str(vals.get("high_cr", vals.get("high", 0))).replace(",", ""))
-                if lo > 0 and hi > 0:
-                    bars.append((method.replace("_", " ").title(), lo, hi))
-            except (ValueError, TypeError):
-                pass
-
-    if not bars:
-        bars = [("DCF", 80000, 120000), ("SOTP", 60000, 90000),
-                ("Trading Comps", 65000, 95000), ("Precedent Tx", 70000, 100000)]
-
-    all_vals  = [v for _, lo, hi in bars for v in (lo, hi)]
-    min_val   = min(all_vals) * 0.85
-    max_val   = max(all_vals) * 1.10
-    val_range = max_val - min_val or 1
-
-    W, H         = 860, 420
-    LEFT, RIGHT  = 220, 60
-    TOP, BOT     = 70,  60
-    bar_area_w   = W - LEFT - RIGHT
-    n            = len(bars)
-    bar_h        = min(36, (H - TOP - BOT) // max(n, 1) - 10)
-    gap          = (H - TOP - BOT - n * bar_h) // (n + 1)
-    colours      = ["#1F3864", "#2E75B6", "#70AD47", "#ED7D31", "#FFC000"]
-
-    lines = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}">',
-        f'<rect width="{W}" height="{H}" fill="#F8F9FA" rx="8"/>',
-        f'<text x="{W//2}" y="40" text-anchor="middle" font-family="Calibri,Arial" '
-        f'font-size="16" font-weight="bold" fill="#1F3864">'
-        f'{(final_state.get("deal_context") or {}).get("target_name","Company")} '
-        f'— Football Field Valuation (INR Cr EV)</text>',
-    ]
-
-    for i, (label, lo, hi) in enumerate(bars):
-        y     = TOP + gap + i * (bar_h + gap)
-        x_lo  = LEFT + (lo - min_val) / val_range * bar_area_w
-        x_hi  = LEFT + (hi - min_val) / val_range * bar_area_w
-        bw    = max(x_hi - x_lo, 6)
-        col   = colours[i % len(colours)]
-        lines += [
-            f'<rect x="{x_lo:.1f}" y="{y}" width="{bw:.1f}" height="{bar_h}" '
-            f'fill="{col}" opacity="0.88" rx="4"/>',
-            f'<text x="{LEFT - 10}" y="{y + bar_h//2 + 5}" text-anchor="end" '
-            f'font-family="Calibri,Arial" font-size="12" fill="#333">{label}</text>',
-            f'<text x="{x_lo - 5:.1f}" y="{y + bar_h//2 + 5}" text-anchor="end" '
-            f'font-family="Calibri,Arial" font-size="10" fill="#555">{lo:,.0f}</text>',
-            f'<text x="{x_hi + 5:.1f}" y="{y + bar_h//2 + 5}" text-anchor="start" '
-            f'font-family="Calibri,Arial" font-size="10" fill="#555">{hi:,.0f}</text>',
-        ]
-
-    lines.append("</svg>")
-    os.makedirs(os.path.dirname(svg_path), exist_ok=True)
-    with open(svg_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-    print(f"  ✅ Football field SVG → {svg_path}")
-
-
-def write_zip_package(output_dir: str, excel_path: str, svg_path: str, final_state: dict):
-    """Package all outputs into analyst_package.zip with a manifest."""
-    import zipfile, json, os
-    from datetime import datetime
-
-    ctx       = final_state.get("deal_context") or {}
-    safe_name = ctx.get("target_name", "Company").replace(" ", "_")
-    zip_path  = os.path.join(output_dir, f"{safe_name}_AnalystPackage.zip")
-
-    manifest = {
-        "generated_at":   datetime.now().isoformat(),
-        "company":        ctx.get("target_name", ""),
-        "ticker":         ctx.get("target_ticker", ""),
-        "transaction":    ctx.get("transaction_type", ""),
-        "files": {
-            "excel":         os.path.basename(excel_path),
-            "football_field": os.path.basename(svg_path),
-            "manifest":      "manifest.json",
-        },
-        "pipeline_status": {
-            "qc_status":  (final_state.get("consistency_report") or {}).get("status", "N/A"),
-            "issues":     len((final_state.get("consistency_report") or {}).get("issues", [])),
-        }
-    }
-
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        if os.path.exists(excel_path):
-            zf.write(excel_path, os.path.basename(excel_path))
-        if os.path.exists(svg_path):
-            zf.write(svg_path, os.path.basename(svg_path))
-        zf.writestr("manifest.json", json.dumps(manifest, indent=2))
-
-    print(f"  ✅ ZIP package  → {zip_path}")
-    return zip_path
 
 
 # ─────────────────────────────────────────────────────────────
@@ -873,7 +766,10 @@ def write_zip_package(output_dir: str, excel_path: str, svg_path: str, final_sta
 
 if __name__ == "__main__":
     import os
+    from dotenv import load_dotenv
     from datetime import datetime
+
+    load_dotenv()
 
     final_state, feedback = run_analyst_pipeline()
 
@@ -884,11 +780,8 @@ if __name__ == "__main__":
     safe_name  = ctx.get("target_name", "Company").replace(" ", "_")
 
     excel_path = os.path.join(output_dir, f"{safe_name}_{timestamp}.xlsx")
-    svg_path   = os.path.join(output_dir, f"{safe_name}_{timestamp}_football_field.svg")
 
     write_excel(final_state, feedback, excel_path)
-    write_football_field_svg(final_state, svg_path)
-    zip_path = write_zip_package(output_dir, excel_path, svg_path, final_state)
 
     cr = final_state.get("consistency_report") or {}
     print(f"\n{'='*60}")
@@ -897,6 +790,4 @@ if __name__ == "__main__":
     print(f"  Decision   : {feedback['decision'].upper()}")
     print(f"  QC Status  : {cr.get('status', 'N/A').upper()}")
     print(f"  Excel      : {excel_path}")
-    print(f"  SVG Chart  : {svg_path}")
-    print(f"  ZIP        : {zip_path}")
     print(f"{'='*60}")

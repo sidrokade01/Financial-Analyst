@@ -9,7 +9,7 @@ class ModelRouter:
     MODEL_MAP = {
         "data_sourcing":     "claude-haiku-4-5-20251001",   # Tier 3: extraction
         "financial_modeler": "claude-sonnet-4-6",            # Tier 2: structured + code
-        "valuation":         "claude-sonnet-4-6",            # Tier 2: cost-optimised
+        "valuation":         "claude-opus-4-6",               # Tier 1: high reasoning
         "benchmarking":      "claude-sonnet-4-6",            # Tier 2: structured comparison
         "analyst_assembly":  "claude-sonnet-4-6",            # Tier 2: review/assembly
     }

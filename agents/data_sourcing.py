@@ -17,9 +17,23 @@ MODEL = "claude-haiku-4-5-20251001"
 
 
 def run(state: dict, runner) -> dict:
-    ctx = state["deal_context"]
+    ctx      = state["deal_context"]
+    pdf_data = ctx.get("pdf_data", "").strip()
 
-    prompt = f"""Return ONLY this JSON structure filled with data for {ctx['target_name']} ({ctx['target_ticker']}):
+    # If PDF was uploaded, prepend it to the prompt so Claude uses real data
+    pdf_section = ""
+    if pdf_data:
+        pdf_section = f"""
+=== UPLOADED PDF DATA (USE THESE REAL NUMBERS) ===
+{pdf_data[:6000]}
+=== END OF PDF DATA ===
+
+Use the above PDF data as the PRIMARY source for all financial figures.
+Only fall back to estimates if specific data is missing from the PDF.
+
+"""
+
+    prompt = f"""{pdf_section}Return ONLY this JSON structure filled with data for {ctx['target_name']} ({ctx['target_ticker']}):
 
 {{
   "company_overview": {{
