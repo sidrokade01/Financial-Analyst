@@ -13,48 +13,72 @@ from human_gate import human_gate
 
 
 def get_user_inputs() -> dict:
-    """Prompt user for company details in the terminal."""
+    """Prompt user for company details — minimal input required."""
     print("\n" + "=" * 60)
-    print("  IB PITCH ANALYST SYSTEM")
+    print("  IB PITCH ANALYST SYSTEM — US Companies")
     print("=" * 60)
 
+    # ── Only required input: company name ─────────────────────
     company = input("\nCompany Name       : ").strip()
-    ticker  = input("Ticker Symbol      : ").strip()
-    print("  (Example: TATAPOWER.NS / ADANIPOWER.NS / HDFCBANK.NS)")
 
-    print("\nSector options:")
-    sectors = [
-        "Technology",
-        "Healthcare",
-        "Financial Services",
-        "Consumer Discretionary",
-        "Energy",
-        "Industrials",
-        "Communication Services",
-        "Consumer Staples",
-        "Real Estate",
-        "Utilities",
-    ]
-    for i, s in enumerate(sectors, 1):
-        print(f"  {i}. {s}")
-    sec_idx = input("Choose sector (1-10): ").strip()
-    sector  = sectors[int(sec_idx) - 1] if sec_idx.isdigit() and 1 <= int(sec_idx) <= 10 else sec_idx
+    # ── Auto-fetch sector + geography from SEC + yfinance ─────
+    sector    = "Unknown"
+    geography = "USA"          # US companies default
+    ticker    = ""
 
-    print("\nGeography options:  USA / UK / Europe / Asia")
-    geography = input("Geography          : ").strip() or "USA"
+    print(f"\n  Searching SEC EDGAR for '{company}'...")
+    try:
+        from data_fetcher import find_cik, fetch_yfinance
+        import yfinance as yf
 
+        # Find CIK and get ticker from SEC company list
+        cik, official_name = find_cik(company)
+
+        if cik:
+            # Get ticker from SEC company tickers mapping
+            import requests
+            resp = requests.get(
+                "https://www.sec.gov/files/company_tickers.json",
+                headers={"User-Agent": "IB-Pitch-Analyst/1.0 (analyst@ibpitch.com)"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                for entry in resp.json().values():
+                    if str(entry.get("cik_str", "")).zfill(10) == cik:
+                        ticker = entry.get("ticker", "")
+                        break
+
+            # Auto-detect sector from yfinance using ticker
+            if ticker:
+                try:
+                    info   = yf.Ticker(ticker).info or {}
+                    sector = info.get("sector") or info.get("industry") or "Unknown"
+                    print(f"  Auto-detected  : Sector = {sector}, Geography = {geography}")
+                except Exception:
+                    pass
+
+            print(f"  Official Name  : {official_name}")
+            print(f"  Ticker         : {ticker or 'Not found'}")
+        else:
+            print(f"  ⚠️  Company not found in SEC EDGAR — will use Claude estimates")
+
+    except Exception as e:
+        print(f"  ⚠️  Auto-detect failed: {e}")
+
+    # ── Transaction type ──────────────────────────────────────
     print("\nTransaction Type:   1. Buy  2. Sell  3. IPO  4. Merger  5. Acquisition")
     txn_map = {"1": "buy-side_advisory", "2": "sell-side_advisory", "3": "ipo", "4": "merger", "5": "acquisition"}
     txn_idx = input("Choose type (1-5)  : ").strip()
     transaction_type = txn_map.get(txn_idx, "sell-side_advisory")
 
+    # ── Business segments ─────────────────────────────────────
     print("\nEnter business segments (comma-separated).")
-    print("Example: Thermal Generation, Renewable Energy, Distribution")
+    print("Example: iPhone, Mac, Services, Wearables")
     seg_input = input("Segments           : ").strip()
     segments  = [s.strip() for s in seg_input.split(",") if s.strip()]
 
-    print("\nOptional: Path to a PDF file (quarterly results / annual report).")
-    print("Press Enter to skip.")
+    # ── Optional PDF ──────────────────────────────────────────
+    print("\nOptional: Path to a PDF (10-K / earnings report). Press Enter to skip.")
     pdf_path = input("PDF path           : ").strip()
     pdf_text = ""
     if pdf_path:
@@ -72,7 +96,7 @@ def get_user_inputs() -> dict:
         "company":          company,
         "ticker":           ticker,
         "sector":           sector,
-        "geography":        geography,
+        "geography":        geography,       # auto = USA
         "transaction_type": transaction_type,
         "segments":         segments,
         "pdf_text":         pdf_text,
@@ -254,11 +278,21 @@ if __name__ == "__main__":
 
     write_json(final_state, feedback, json_path)
 
-    cr = final_state.get("consistency_report") or {}
+    cr  = final_state.get("consistency_report") or {}
+    rd  = final_state.get("raw_data") or {}
+    co  = rd.get("company_overview") or {}
+
     print(f"\n{'='*60}")
-    print("PIPELINE COMPLETE")
+    print("PIPELINE COMPLETE — OUTPUT SUMMARY")
     print(f"{'='*60}")
-    print(f"  Decision : {feedback['decision'].upper()}")
-    print(f"  QC Status: {cr.get('status', 'N/A').upper()}")
-    print(f"  JSON     : {json_path}")
+    print(f"  Company    : {ctx.get('target_name')}")
+    print(f"  Geography  : {ctx.get('geography', 'USA')} (auto-detected)")
+    print(f"  Sector     : {co.get('sector') or ctx.get('sector', 'N/A')}")
+    print(f"  Industry   : {co.get('industry', 'N/A')}")
+    print(f"  Stock Price: ${co.get('stock_price_usd', 'N/A')}")
+    print(f"  Market Cap : ${co.get('market_cap_usd_m', 'N/A')}M")
+    print(f"  P/E Ratio  : {co.get('pe_ratio', 'N/A')}x")
+    print(f"  Decision   : {feedback['decision'].upper()}")
+    print(f"  QC Status  : {cr.get('status', 'N/A').upper()}")
+    print(f"  JSON       : {json_path}")
     print(f"{'='*60}")
