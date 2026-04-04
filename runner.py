@@ -10,7 +10,12 @@ from anthropic import Anthropic
 from model_router import ModelRouter
 
 # Load .env file
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
+# Fix Unicode encoding for Windows terminal
+import sys
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 # Import system prompt from each agent file
 from agents.data_sourcing    import SYSTEM_PROMPT as DATA_SOURCING_PROMPT

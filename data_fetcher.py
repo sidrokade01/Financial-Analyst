@@ -113,9 +113,12 @@ def fetch_sec_facts(cik: str) -> dict:
         # ── Helper: get latest annual value for a metric ──────
         def get_annual_values(metric_keys: list, n_years: int = 5) -> dict:
             """
-            Try multiple metric key names, return {year: value_in_millions}.
+            Try ALL metric keys, pick the one with the MOST RECENT data.
             SEC reports in USD, we convert to millions.
             """
+            best_result = {}
+            best_latest_year = ""
+
             for key in metric_keys:
                 if key not in us_gaap:
                     continue
@@ -142,19 +145,27 @@ def fetch_sec_facts(cik: str) -> dict:
                 annual.sort(key=lambda x: x.get("end", ""), reverse=True)
 
                 # De-duplicate by year
-                seen  = {}
+                seen = {}
                 for entry in annual:
                     year = entry.get("end", "")[:4]
                     if year and year not in seen:
-                        seen[year] = round(entry.get("val", 0) / 1e6, 1)  # USD → $M
+                        seen[year] = round(entry.get("val", 0) / 1e6, 1)
+
+                if not seen:
+                    continue
 
                 # Return latest n_years
-                result = {}
+                candidate = {}
                 for year in sorted(seen.keys(), reverse=True)[:n_years]:
-                    result[year] = seen[year]
-                return result
+                    candidate[year] = seen[year]
 
-            return {}
+                # Pick candidate with most recent latest year
+                latest = max(candidate.keys()) if candidate else ""
+                if latest > best_latest_year:
+                    best_latest_year = latest
+                    best_result = candidate
+
+            return best_result
 
         # ── Pull key financial metrics ─────────────────────────
         revenue = get_annual_values([
@@ -262,13 +273,34 @@ def fetch_yfinance(ticker: str) -> dict:
         print(f"  [yfinance] Fetching live market data for {ticker}...")
 
         stock = yf.Ticker(ticker)
-        info  = stock.info or {}
+
+        # Use fast_info as primary source (reliable for price + market cap)
+        stock_price   = None
+        market_cap_m  = 0.0
+        try:
+            fi = stock.fast_info
+            stock_price  = fi.last_price
+            market_cap_m = round((fi.market_cap or 0) / 1e6, 1)
+        except Exception:
+            pass
+
+        # Fallback: info dict for price/market cap
+        info = {}
+        try:
+            info = stock.info or {}
+        except Exception:
+            info = {}
+
+        if not stock_price:
+            stock_price = info.get("currentPrice") or info.get("regularMarketPrice")
+        if not market_cap_m:
+            market_cap_m = round(info.get("marketCap", 0) / 1e6, 1)
 
         result = {
             "source":        "Yahoo Finance (yfinance)",
             "ticker":        ticker,
-            "stock_price":   info.get("currentPrice") or info.get("regularMarketPrice"),
-            "market_cap_usd_m": round(info.get("marketCap", 0) / 1e6, 1),
+            "stock_price":   stock_price,
+            "market_cap_usd_m": market_cap_m,
             "pe_ratio":      info.get("trailingPE"),
             "forward_pe":    info.get("forwardPE"),
             "pb_ratio":      info.get("priceToBook"),
