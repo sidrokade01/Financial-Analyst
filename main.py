@@ -24,20 +24,24 @@ def get_user_inputs() -> dict:
 
     print("\nSector options:")
     sectors = [
-        "Power / Utilities",
-        "Oil & Gas / Conglomerate",
-        "Banking & Financial Services",
-        "IT Services",
-        "FMCG",
-        "Telecommunications",
+        "Technology",
+        "Healthcare",
+        "Financial Services",
+        "Consumer Discretionary",
+        "Energy",
+        "Industrials",
+        "Communication Services",
+        "Consumer Staples",
+        "Real Estate",
+        "Utilities",
     ]
     for i, s in enumerate(sectors, 1):
         print(f"  {i}. {s}")
-    sec_idx = input("Choose sector (1-6): ").strip()
-    sector  = sectors[int(sec_idx) - 1] if sec_idx.isdigit() and 1 <= int(sec_idx) <= 6 else sec_idx
+    sec_idx = input("Choose sector (1-10): ").strip()
+    sector  = sectors[int(sec_idx) - 1] if sec_idx.isdigit() and 1 <= int(sec_idx) <= 10 else sec_idx
 
-    print("\nGeography options:  India / USA / UK / Singapore / UAE")
-    geography = input("Geography          : ").strip() or "India"
+    print("\nGeography options:  USA / UK / Europe / Asia")
+    geography = input("Geography          : ").strip() or "USA"
 
     print("\nTransaction Type:   1. Buy  2. Sell  3. IPO  4. Merger  5. Acquisition")
     txn_map = {"1": "buy-side_advisory", "2": "sell-side_advisory", "3": "ipo", "4": "merger", "5": "acquisition"}
