@@ -316,9 +316,11 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     ctx       = final_state.get("deal_context") or {}
+    ticker    = (ctx.get("target_ticker") or "").upper().strip()
     safe_name = ctx.get("target_name", "Company").replace(" ", "_").replace("/", "-")
+    file_stem = ticker if ticker else safe_name
 
-    json_path = os.path.join(output_dir, f"{safe_name}_{timestamp}.json")
+    json_path = os.path.join(output_dir, f"{file_stem}_{timestamp}.json")
 
     write_json(final_state, feedback, json_path)
 
