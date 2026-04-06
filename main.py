@@ -72,10 +72,54 @@ def get_user_inputs() -> dict:
     transaction_type = txn_map.get(txn_idx, "sell-side_advisory")
 
     # ── Business segments ─────────────────────────────────────
+    # Known segments for major US companies
+    KNOWN_SEGMENTS = {
+        "apple":     ["iPhone", "Mac", "iPad", "Services", "Wearables"],
+        "microsoft": ["Intelligent Cloud", "Productivity and Business Processes", "More Personal Computing"],
+        "alphabet":  ["Google Search", "YouTube", "Google Cloud", "Other Bets"],
+        "google":    ["Google Search", "YouTube", "Google Cloud", "Other Bets"],
+        "amazon":    ["North America", "International", "AWS"],
+        "meta":      ["Family of Apps", "Reality Labs"],
+        "nvidia":    ["Data Center", "Gaming", "Professional Visualization", "Automotive"],
+        "tesla":     ["Automotive", "Energy Generation and Storage", "Services and Other"],
+        "netflix":   ["United States and Canada", "Europe Middle East Africa", "Latin America", "Asia Pacific"],
+        "salesforce":["Sales Cloud", "Service Cloud", "Platform and Other", "Marketing Cloud"],
+        "adobe":     ["Digital Media", "Digital Experience", "Publishing and Advertising"],
+        "intel":     ["Client Computing", "Data Center and AI", "Network and Edge", "Mobileye"],
+        "amd":       ["Data Center", "Client", "Gaming", "Embedded"],
+        "qualcomm":  ["QCT Handsets", "QCT Automotive", "QCT IoT", "QTL"],
+        "jpmorgan":  ["Consumer and Community Banking", "Commercial Banking", "Corporate and Investment Bank", "Asset Management"],
+        "goldman":   ["Global Banking and Markets", "Asset and Wealth Management", "Platform Solutions"],
+        "berkshire": ["Insurance", "BNSF Railway", "Berkshire Hathaway Energy", "Manufacturing", "Retail"],
+        "exxon":     ["Upstream", "Energy Products", "Chemical Products", "Specialty Products"],
+        "johnson":   ["MedTech", "Innovative Medicine"],
+        "pfizer":    ["Primary Care", "Specialty Care", "Oncology", "Hospital"],
+        "unitedhealth": ["UnitedHealthcare", "Optum Health", "Optum Insight", "Optum Rx"],
+        "walmart":   ["Walmart US", "Walmart International", "Sam's Club"],
+        "visa":      ["Consumer Payments", "Commercial and Money Movement", "Value Added Services"],
+    }
+
+    # Look up suggested segments using company name (try each word)
+    lookup_key = ""
+    for word in company.lower().split():
+        if word in KNOWN_SEGMENTS:
+            lookup_key = word
+            break
+    suggested = KNOWN_SEGMENTS.get(lookup_key, [])
+
     print("\nEnter business segments (comma-separated).")
-    print("Example: iPhone, Mac, Services, Wearables")
-    seg_input = input("Segments           : ").strip()
-    segments  = [s.strip() for s in seg_input.split(",") if s.strip()]
+    if suggested:
+        print(f"Suggested for {company}: {', '.join(suggested)}")
+        print("Press Enter to use suggested, or type your own.")
+        seg_input = input("Segments           : ").strip()
+        if not seg_input:
+            seg_input = ", ".join(suggested)
+            print(f"  Using: {seg_input}")
+    else:
+        print("Example: Segment A, Segment B, Segment C")
+        seg_input = input("Segments           : ").strip()
+
+    segments = [s.strip() for s in seg_input.split(",") if s.strip()]
 
     # ── Optional PDF ──────────────────────────────────────────
     print("\nOptional: Path to a PDF (10-K / earnings report). Press Enter to skip.")
